@@ -1,13 +1,12 @@
 ---
+
 title: Email Triage Env
 emoji: 📧
 colorFrom: blue
 colorTo: green
 sdk: docker
 pinned: false
----
-
-
+-------------
 
 # 📧 Email Classification & Triage — OpenEnv Environment
 
@@ -19,103 +18,142 @@ pinned: false
 
 ## 🌍 Project Overview
 
-Every knowledge worker processes dozens or hundreds of emails a day. The decisions seem
-simple — *is this spam? does this need a reply? how urgent is it?* — but they require
-contextual reasoning, domain knowledge, and the ability to detect deception (phishing,
-fake CEO requests, scam promotions).
+Every knowledge worker processes dozens or even hundreds of emails daily. These decisions seem simple — *is this spam? does this need a reply? how urgent is it?* — but they actually require contextual reasoning, pattern recognition, and the ability to detect deception (such as phishing or fake authority emails).
 
-**Email Triage** is an OpenEnv environment that challenges AI agents to replicate this
-human skill at production quality. The agent reads a stream of emails one by one,
-classifies each one, and optionally drafts a short response — exactly as a real inbox
-assistant would.
+**Email Triage** is an OpenEnv-compatible environment that simulates this real-world problem.
+An AI agent processes emails one-by-one, classifies them, and optionally generates responses — just like a real intelligent inbox assistant.
 
 ---
 
 ## 🧠 Real-World Motivation
 
-| Pain Point | How This Env Captures It |
-|---|---|
-| Spam vs. legitimate look-alikes | Hard task includes CEO phishing that *looks* urgent |
-| Promotions disguised as important | Medium task mixes LinkedIn upsells with real security alerts |
-| Operational urgency | PagerDuty alerts, storage limits, contract deadlines |
-| Fraud detection | Nigerian prince, PayPal transaction, gift card scams |
+| Problem                        | How This Environment Models It                   |
+| ------------------------------ | ------------------------------------------------ |
+| Spam vs legitimate emails      | Includes scams, promotions, and real work emails |
+| Phishing attacks               | CEO gift card scam and fake urgent requests      |
+| Promotions vs important alerts | Mixed cases like LinkedIn vs bank alerts         |
+| Urgency handling               | Critical alerts vs fake urgency marketing        |
+| Fraud detection                | PayPal alerts, suspicious links                  |
 
 ---
 
 ## 📥 Observation Space
 
-Each step the agent receives an `Observation` object:
+Each step returns an `Observation`:
 
-| Field | Type | Description |
-|---|---|---|
-| `email_id` | string | Unique email identifier |
-| `email_text` | string | Full body of the email |
-| `sender` | string | Sender email/name |
-| `subject` | string | Email subject line |
-| `urgency` | enum | `low` / `medium` / `high` |
-| `previous_action` | string\|null | Label applied to the previous email |
-| `step_number` | int | Current step (0-based) |
-| `total_steps` | int | Total emails in this task |
+| Field             | Type        | Description             |
+| ----------------- | ----------- | ----------------------- |
+| `email_id`        | string      | Unique identifier       |
+| `email_text`      | string      | Full email body         |
+| `sender`          | string      | Sender address          |
+| `subject`         | string      | Email subject           |
+| `urgency`         | enum        | `low`, `medium`, `high` |
+| `previous_action` | string|null | Last action taken       |
+| `step_number`     | int         | Current step            |
+| `total_steps`     | int         | Total emails            |
 
 ---
 
 ## 🎮 Action Space
 
-The agent returns an `Action` object:
+Agent returns:
 
-| Field | Type | Description |
-|---|---|---|
-| `label` | enum | `spam` / `important` / `promotion` |
-| `optional_response` | string\|null | Short reply (max 200 chars); required for important emails |
+| Field               | Type        | Description                        |
+| ------------------- | ----------- | ---------------------------------- |
+| `label`             | enum        | `spam`, `important`, `promotion`   |
+| `optional_response` | string|null | Short reply (for important emails) |
 
 ---
 
 ## 🏆 Reward Design
 
-Reward per step is continuous from **−0.2 to 1.0**:
+Reward per step ranges from **−0.2 to 1.0**:
 
 ```
 reward = classification_score + urgency_score + response_score
-
-classification_score:  +0.7  if label is correct,  else 0.0
-urgency_score:         +0.2  if urgency handled correctly (only when classification correct)
-response_score:        +0.1  if response is substantive (for important emails)
-                       −0.1  if unnecessary response on low-priority email
-                       −0.2  if random/garbage response with wrong classification
 ```
 
-Episode score = average of `max(0, step_reward)` across all emails, normalized to [0, 1].
+* **+0.7** → correct classification
+* **+0.2** → correct urgency handling
+* **+0.1** → good response (important emails)
+
+Penalties:
+
+* **−0.1** → unnecessary response
+* **−0.2** → wrong/random response
+
+Final score = normalized average across all steps.
 
 ---
 
 ## 📋 Task Descriptions
 
-### 🟢 Easy – Obvious Spam Detection (5 emails)
-Classic spam signals: lottery scams, Nigerian prince fraud, pharma spam mixed with
-clear work emails (budget review, client follow-up). A rule-based agent should score ≥ 0.8.
+### 🟢 Easy (5 emails)
 
-### 🟡 Medium – Promotion vs Important (6 emails)
-Amazon Prime Day deals vs. HR performance reviews. LinkedIn follower alerts vs. bank
-security warnings. Requires reading intent, not just sender domain.
+* Obvious spam detection
+* Lottery scams, pharma spam
+* Simple classification
 
-### 🔴 Hard – Ambiguous Reasoning (7 emails)
-Includes:
-- CEO gift card phishing (looks like internal mail)
-- PayPal transaction alerts (may indicate fraud)
-- GitHub archival warnings (automated but actionable)
-- PagerDuty critical alerts (requires immediate response)
-- Travel flash sales (artificial urgency, really just promotions)
+---
+
+### 🟡 Medium (6 emails)
+
+* Promotions vs important
+* Requires understanding intent
+* Mixed real-world cases
+
+---
+
+### 🔴 Hard (7 emails)
+
+* Ambiguous & deceptive emails
+* Includes:
+
+  * CEO phishing attack
+  * Payment alerts
+  * System warnings
+  * Fake urgency promotions
+
+---
+
+## 📈 My Model Results (Groq - Llama 3.1)
+
+Using a free OpenAI-compatible API (Groq):
+
+| Task        | Score    |
+| ----------- | -------- |
+| Easy        | 0.90     |
+| Medium      | 0.95     |
+| Hard        | 0.77     |
+| **Average** | **0.87** |
+
+These results show that even lightweight open-source models can perform strongly on structured reasoning tasks.
+
+---
+
+## 🔍 Key Insight
+
+During evaluation, the model misclassified a **CEO gift card phishing email** as important instead of spam.
+
+This highlights a real-world limitation:
+
+* Phishing emails mimic authority and urgency
+* Even strong models can fail under deceptive patterns
+
+This environment effectively tests such edge cases, making it highly practical for evaluating AI robustness.
+
+---
+
+## 🌐 Live Demo
+
+* 🔗 API: https://sourabh5500-email-triage-env.hf.space
+* 📄 Docs: https://sourabh5500-email-triage-env.hf.space/docs
 
 ---
 
 ## 🚀 Setup Instructions
 
-### Prerequisites
-- Python 3.11+
-- Docker (for containerized runs)
-- OpenAI-compatible API key
-
-### Local Setup
+### 🔹 Local Setup
 
 ```bash
 git clone https://huggingface.co/spaces/your-username/email-triage-env
@@ -125,9 +163,9 @@ pip install -r requirements.txt
 uvicorn server.app:app --host 0.0.0.0 --port 7860 --reload
 ```
 
-The API will be live at `http://localhost:7860`.
+---
 
-### Docker
+### 🔹 Docker
 
 ```bash
 docker build -t email-triage-env .
@@ -139,34 +177,13 @@ docker run -p 7860:7860 email-triage-env
 ## 🤖 Running Inference
 
 ```bash
-export OPENAI_API_KEY=sk-...
-export API_BASE_URL=https://api.openai.com/v1
-export MODEL_NAME=gpt-4o-mini
+export OPENAI_API_KEY=your_key
+export API_BASE_URL=https://api.groq.com/openai/v1
+export MODEL_NAME=llama-3.1-8b-instant
 export SERVER_URL=http://localhost:7860
 
 python inference.py
 ```
-
-### Log Format
-
-```
-[START] task=easy env=email_triage_env model=gpt-4o-mini
-[STEP] step=0 action={"label": "spam", "optional_response": null} reward=0.9 done=false error=null
-[STEP] step=1 action={"label": "important", "optional_response": "Noted, I will review..."} reward=1.0 done=false error=null
-...
-[END] success=true steps=5 score=0.94 rewards=[0.9, 1.0, 0.9, 1.0, 0.8]
-```
-
----
-
-## 📊 Baseline Results
-
-| Task | Random Agent | Rule-Based | GPT-4o-mini | GPT-4o |
-|---|---|---|---|---|
-| Easy | 0.23 | 0.82 | **0.94** | **1.00** |
-| Medium | 0.21 | 0.61 | **0.87** | **0.95** |
-| Hard | 0.19 | 0.48 | **0.76** | **0.89** |
-| **Average** | **0.21** | **0.64** | **0.86** | **0.95** |
 
 ---
 
@@ -175,14 +192,13 @@ python inference.py
 ```
 email_triage_env/
 ├── env/
-│   ├── __init__.py
-│   ├── models.py          # Pydantic models: Observation, Action, Reward
-│   ├── environment.py     # Core env: reset(), step(), state()
-│   └── tasks.py           # 3 tasks + grader functions
+│   ├── models.py
+│   ├── environment.py
+│   └── tasks.py
 ├── server/
-│   ├── __init__.py
-│   └── app.py             # FastAPI server
-├── inference.py           # LLM agent runner
+│   └── app.py
+├── inference.py
+├── run.py
 ├── Dockerfile
 ├── requirements.txt
 ├── openenv.yaml
@@ -193,15 +209,15 @@ email_triage_env/
 
 ## 🔌 API Reference
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/health` | Health check |
-| `POST` | `/reset` | Start a new episode (`{"task_name": "easy"}`) |
-| `POST` | `/step` | Submit an action (`{"label": "spam", "optional_response": null}`) |
-| `GET` | `/state` | Get full current episode state |
+| Method | Endpoint  | Description    |
+| ------ | --------- | -------------- |
+| GET    | `/health` | Health check   |
+| POST   | `/reset`  | Start new task |
+| POST   | `/step`   | Submit action  |
+| GET    | `/state`  | Current state  |
 
 ---
 
 ## 📝 License
 
-MIT License. Built for the OpenEnv Hackathon.
+MIT License — built for OpenEnv Hackathon.
