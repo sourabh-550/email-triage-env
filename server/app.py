@@ -75,16 +75,25 @@ def root():
     }
 
 
+from typing import Optional
+
 @app.post("/reset", response_model=Observation)
-def reset(request: ResetRequest):
+def reset(request: Optional[ResetRequest] = None):
     global _env
+
+    task_name = "easy"  # default
+
+    if request and request.task_name:
+        task_name = request.task_name
+
     valid = ["easy", "medium", "hard"]
-    if request.task_name not in valid:
+    if task_name not in valid:
         raise HTTPException(
             status_code=400,
             detail=f"Invalid task_name. Choose from {valid}",
         )
-    _env = EmailTriageEnv(task_name=request.task_name)
+
+    _env = EmailTriageEnv(task_name=task_name)
     obs = _env.reset()
     return obs
 
