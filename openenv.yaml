@@ -1,0 +1,67 @@
+# OpenEnv Environment Specification
+name: email_triage_env
+version: "1.0.0"
+description: >
+  Simulates a human email inbox manager. An agent receives emails one at a time
+  and must classify them (spam / important / promotion) and optionally draft a reply.
+  Reward is continuous (−0.2 to 1.0) based on classification accuracy, urgency
+  handling, and response quality.
+
+author: openenv-hackathon
+license: MIT
+
+environment:
+  type: sequential          # one email per step
+  observation_space:
+    email_id: string
+    email_text: string
+    sender: string
+    subject: string
+    urgency: enum[low, medium, high]
+    previous_action: string | null
+    step_number: integer
+    total_steps: integer
+  action_space:
+    label: enum[spam, important, promotion]
+    optional_response: string | null   # max 200 chars
+
+reward:
+  min: -0.2
+  max: 1.0
+  breakdown:
+    classification_score: 0.7   # correct label
+    urgency_score: 0.2          # correct urgency handling
+    response_score: 0.1         # response quality
+  penalties:
+    wrong_classification: 0.0   # no classification points
+    random_response: -0.2       # gibberish reply on wrong classification
+
+tasks:
+  - name: easy_spam_detection
+    difficulty: easy
+    description: "Obvious spam emails mixed with clear work emails."
+    num_emails: 5
+
+  - name: medium_promo_vs_important
+    difficulty: medium
+    description: "Promotional vs genuinely important emails requiring reasoning."
+    num_emails: 6
+
+  - name: hard_ambiguous_reasoning
+    difficulty: hard
+    description: "Ambiguous real-world emails that require contextual reasoning."
+    num_emails: 7
+
+server:
+  framework: fastapi
+  port: 7860
+  endpoints:
+    - POST /reset
+    - POST /step
+    - GET  /state
+    - GET  /health
+
+deployment:
+  platform: huggingface-spaces
+  sdk: docker
+  hardware: cpu-basic       # runs on 2 CPU / 8 GB RAM
