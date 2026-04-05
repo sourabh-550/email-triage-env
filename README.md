@@ -6,7 +6,7 @@ colorFrom: blue
 colorTo: green
 sdk: docker
 pinned: false
--------------
+---
 
 # 📧 Email Classification & Triage — OpenEnv Environment
 
