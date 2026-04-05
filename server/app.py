@@ -59,6 +59,21 @@ class StepRequest(BaseModel):
 def health():
     return {"status": "ok", "env": "email_triage_env"}
 
+@app.get("/")
+def root():
+    return {
+        "name": "Email Triage OpenEnv",
+        "version": "1.0.0",
+        "status": "running",
+        "endpoints": {
+            "health": "/health",
+            "docs": "/docs",
+            "reset": "POST /reset",
+            "step": "POST /step",
+            "state": "GET /state"
+        }
+    }
+
 
 @app.post("/reset", response_model=Observation)
 def reset(request: ResetRequest):
