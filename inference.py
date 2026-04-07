@@ -1,45 +1,40 @@
-"""
-inference.py – Runs all 3 tasks of the Email Triage environment using an
-OpenAI-compatible LLM client against the live FastAPI server.
-
-Environment variables:
-  API_BASE_URL   – Base URL of the OpenAI-compatible API  (default: https://api.openai.com/v1)
-  MODEL_NAME     – Model name to use                       (default: gpt-4o-mini)
-  HF_TOKEN       – Hugging Face token (unused here, kept for OpenEnv compatibility)
-
-Logging format (strict):
-  [START] task=... env=... model=...
-  [STEP]  step=... action=... reward=... done=... error=null
-  [END]   success=... steps=... score=... rewards=...
-"""
 from dotenv import load_dotenv
-load_dotenv()   # loads .env file automatically
+load_dotenv()
+
+"""
+inference.py – Runs all 3 tasks of the Email Triage environment.
+"""
 
 import os
 import json
 import sys
 import requests
+
+# --- Safe OpenAI client setup ---
 from openai import OpenAI
 
-# ------------------------------------------------------------------
-# Configuration
-# ------------------------------------------------------------------
-
 API_BASE_URL = os.environ.get("API_BASE_URL", "https://api.openai.com/v1")
-MODEL_NAME = os.environ.get("MODEL_NAME", "gpt-4o-mini")
-HF_TOKEN = os.environ.get("HF_TOKEN", "")
-SERVER_URL = os.environ.get("SERVER_URL", "http://localhost:7860")
+MODEL_NAME   = os.environ.get("MODEL_NAME", "gpt-4o-mini")
+HF_TOKEN     = os.environ.get("HF_TOKEN", "")
+SERVER_URL   = os.environ.get("SERVER_URL", "http://localhost:7860")
 
-client = OpenAI(base_url=API_BASE_URL, api_key=os.environ.get("OPENAI_API_KEY", HF_TOKEN or "sk-placeholder"))
+_api_key = os.environ.get("OPENAI_API_KEY", HF_TOKEN or "sk-placeholder")
+
+try:
+    import httpx
+    client = OpenAI(
+        base_url=API_BASE_URL,
+        api_key=_api_key,
+        http_client=httpx.Client()
+    )
+except TypeError:
+    client = OpenAI(
+        base_url=API_BASE_URL,
+        api_key=_api_key,
+    )
 
 TASKS = ["easy", "medium", "hard"]
-
 ENV_NAME = "email_triage_env"
-
-
-# ------------------------------------------------------------------
-# Prompt template
-# ------------------------------------------------------------------
 
 SYSTEM_PROMPT = """You are an expert email triage assistant. Your job is to classify each email and optionally draft a brief reply.
 
@@ -75,51 +70,55 @@ Step: {obs['step_number'] + 1} of {obs['total_steps']}
 Respond with JSON only."""
 
 
-# ------------------------------------------------------------------
-# Agent call
-# ------------------------------------------------------------------
-
 def call_agent(observation: dict) -> dict:
     """Call the LLM and parse its JSON action."""
-    response = client.chat.completions.create(
-        model=MODEL_NAME,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": build_user_prompt(observation)},
-        ],
-        temperature=0.0,
-        max_tokens=200,
-    )
-    raw = response.choices[0].message.content.strip()
+    try:
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": build_user_prompt(observation)},
+            ],
+            temperature=0.0,
+            max_tokens=200,
+        )
+        raw = response.choices[0].message.content.strip()
 
-    # Strip markdown fences if present
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    raw = raw.strip()
+        # Strip markdown fences if present
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        raw = raw.strip()
 
-    action = json.loads(raw)
+        action = json.loads(raw)
 
-    # Validate label
-    valid_labels = ["spam", "important", "promotion"]
-    if action.get("label") not in valid_labels:
-        action["label"] = "spam"
+        # Validate label
+        valid_labels = ["spam", "important", "promotion"]
+        if action.get("label") not in valid_labels:
+            action["label"] = "spam"
 
-    return action
+        return action
 
+    except Exception as e:
+        # Fallback action on any error
+        return {"label": "spam", "optional_response": None}
 
-# ------------------------------------------------------------------
-# Run one task
-# ------------------------------------------------------------------
 
 def run_task(task_name: str) -> dict:
     print(f"[START] task={task_name} env={ENV_NAME} model={MODEL_NAME}")
 
-    # Reset the environment
-    reset_resp = requests.post(f"{SERVER_URL}/reset", json={"task_name": task_name})
-    reset_resp.raise_for_status()
-    observation = reset_resp.json()
+    try:
+        reset_resp = requests.post(
+            f"{SERVER_URL}/reset",
+            json={"task_name": task_name},
+            timeout=30
+        )
+        reset_resp.raise_for_status()
+        observation = reset_resp.json()
+    except Exception as e:
+        print(f"[END] success=false steps=0 score=0 rewards=[] error={str(e)!r}")
+        return {"task": task_name, "success": False, "steps": 0, "score": 0, "rewards": []}
 
     step_num = 0
     all_rewards = []
@@ -127,19 +126,13 @@ def run_task(task_name: str) -> dict:
     success = True
 
     while not done:
-        try:
-            action = call_agent(observation)
-        except Exception as e:
-            print(f"[STEP] step={step_num} action=null reward=0 done=false error={str(e)!r}")
-            # Fallback action
-            action = {"label": "spam", "optional_response": None}
-            success = False
+        action = call_agent(observation)
 
-        # Submit action to environment
         try:
             step_resp = requests.post(
                 f"{SERVER_URL}/step",
                 json=action,
+                timeout=30
             )
             step_resp.raise_for_status()
             result = step_resp.json()
@@ -165,8 +158,9 @@ def run_task(task_name: str) -> dict:
         if not done and result.get("observation"):
             observation = result["observation"]
 
-    # Final score
-    total_score = round(sum(max(0, r) for r in all_rewards) / max(len(all_rewards), 1), 4)
+    total_score = round(
+        sum(max(0, r) for r in all_rewards) / max(len(all_rewards), 1), 4
+    )
 
     print(
         f"[END] success={str(success).lower()} "
@@ -184,10 +178,6 @@ def run_task(task_name: str) -> dict:
     }
 
 
-# ------------------------------------------------------------------
-# Main
-# ------------------------------------------------------------------
-
 def main():
     print(f"=== Email Triage Inference ===")
     print(f"Server:  {SERVER_URL}")
@@ -197,7 +187,7 @@ def main():
 
     # Verify server is up
     try:
-        h = requests.get(f"{SERVER_URL}/health", timeout=10)
+        h = requests.get(f"{SERVER_URL}/health", timeout=30)
         h.raise_for_status()
     except Exception as e:
         print(f"ERROR: Cannot reach server at {SERVER_URL} – {e}")
@@ -205,11 +195,14 @@ def main():
 
     results = []
     for task in TASKS:
-        result = run_task(task)
-        results.append(result)
+        try:
+            result = run_task(task)
+            results.append(result)
+        except Exception as e:
+            print(f"ERROR in task {task}: {e}")
+            results.append({"task": task, "success": False, "steps": 0, "score": 0, "rewards": []})
         print()
 
-    # Summary
     print("=== SUMMARY ===")
     overall = round(sum(r["score"] for r in results) / len(results), 4)
     for r in results:
