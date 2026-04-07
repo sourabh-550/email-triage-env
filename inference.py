@@ -117,8 +117,8 @@ def run_task(task_name: str) -> dict:
         reset_resp.raise_for_status()
         observation = reset_resp.json()
     except Exception as e:
-        print(f"[END] success=false steps=0 score=1e-9 rewards=[] error={str(e)!r}")
-        return {"task": task_name, "success": False, "steps": 0, "score": 1e-9, "rewards": []}
+        print(f"[END] success=false steps=0 score=0.001 rewards=[] error={str(e)!r}")
+        return {"task": task_name, "success": False, "steps": 0, "score": 0.001, "rewards": []}
 
     step_num = 0
     all_rewards = []
@@ -160,13 +160,12 @@ def run_task(task_name: str) -> dict:
 
     _raw_score = sum(max(0, r) for r in all_rewards) / max(len(all_rewards), 1)
     # Clamp strictly within (0, 1) – validator requires score != 0.0 and != 1.0
-    _eps = 1e-9
-    total_score = round(max(_eps, min(1.0 - _eps, _raw_score)), 4)
-    # Ensure the rounded value is also strictly in (0, 1)
+    # NOTE: 1e-9 rounds to 0.0 at 4 d.p., so use 0.001 as the safe floor.
+    total_score = round(max(0.001, min(0.999, _raw_score)), 4)
     if total_score <= 0.0:
-        total_score = _eps
+        total_score = 0.001
     elif total_score >= 1.0:
-        total_score = 1.0 - _eps
+        total_score = 0.999
 
     print(
         f"[END] success={str(success).lower()} "
@@ -206,7 +205,7 @@ def main():
             results.append(result)
         except Exception as e:
             print(f"ERROR in task {task}: {e}")
-            results.append({"task": task, "success": False, "steps": 0, "score": 1e-9, "rewards": []})
+            results.append({"task": task, "success": False, "steps": 0, "score": 0.001, "rewards": []})
         print()
 
     print("=== SUMMARY ===")

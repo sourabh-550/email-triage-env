@@ -321,6 +321,9 @@ def grade_step(email: dict[str, Any], action: dict[str, Any]) -> dict[str, Any]:
     """
     Deterministic grader for a single email + action pair.
     Returns classification_score, urgency_score, response_score, total, feedback.
+
+    The total is clamped strictly within (0.001, 0.999) so that any aggregated
+    task score computed by the evaluator is always strictly within (0, 1).
     """
     label = action.get("label", "")
     response = action.get("optional_response") or ""
@@ -355,7 +358,16 @@ def grade_step(email: dict[str, Any], action: dict[str, Any]) -> dict[str, Any]:
         response_feedback = "Random/spam-like response with wrong classification."
 
     total = round(classification_score + urgency_score + response_score, 3)
-    total = max(-0.2, min(1.0, total))  # clamp
+    total = max(-0.2, min(1.0, total))  # clamp to valid reward range
+
+    # Ensure the task-level score (average of step totals) is always strictly
+    # within (0, 1).  We normalise the raw total into (0.001, 0.999) so that
+    # ANY average of step scores is also in (0.001, 0.999) ⊂ (0, 1).
+    # raw range is [-0.2, 1.0] → map to [0.001, 0.999]
+    _lo, _hi = -0.2, 1.0
+    _out_lo, _out_hi = 0.001, 0.999
+    normalised = _out_lo + (_out_hi - _out_lo) * (total - _lo) / (_hi - _lo)
+    normalised = round(max(_out_lo, min(_out_hi, normalised)), 4)
 
     feedback = f"{class_feedback} {urgency_feedback} {response_feedback}"
 
@@ -363,25 +375,27 @@ def grade_step(email: dict[str, Any], action: dict[str, Any]) -> dict[str, Any]:
         "classification_score": classification_score,
         "urgency_score": urgency_score,
         "response_score": response_score,
-        "total": total,
+        "total": normalised,
         "feedback": feedback.strip(),
     }
 
 
 def grade_episode(task_name: str, actions: list[dict]) -> float:
     """
-    Grade a full episode and return a normalized score between 0.0 and 1.0.
+    Grade a full episode and return a score strictly within (0, 1).
     """
     task = ALL_TASKS[task_name]
     dataset = task["dataset"]
     if not dataset or not actions:
-        return 0.0
+        return 0.001  # never return exactly 0.0
 
     total_score = 0.0
-    max_possible = len(dataset) * 1.0  # max reward per step is 1.0
+    max_possible = len(dataset) * 0.999  # max per step after normalisation
 
     for email, action in zip(dataset, actions):
         result = grade_step(email, action)
-        total_score += max(0.0, result["total"])  # floor at 0 for episode scoring
+        total_score += max(0.001, result["total"])  # floor at 0.001 for episode scoring
 
-    return round(total_score / max_possible, 4)
+    raw = total_score / max_possible
+    # clamp strictly within (0, 1)
+    return round(max(0.001, min(0.999, raw)), 4)
